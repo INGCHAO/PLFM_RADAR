@@ -1161,20 +1161,20 @@ initial begin
     // The registers were re-loaded in G9. Send fresh values to verify write path.
 
     // --- Range Mode Register (0x20, Fix 7) ---
-    // G14.1: Set range_mode to short-range (0x01)
+    // G14.1: Set range_mode to long-range (0x01)
     bfm_send_cmd(8'h20, 8'h00, 16'h0001);
     check(dut.host_range_mode == 2'b01,
-          "G14.1: Opcode 0x20 -> host_range_mode = 2'b01 (short)");
+          "G14.1: Opcode 0x20 -> host_range_mode = 2'b01 (long-range)");
 
-    // G14.2: Set range_mode to long-range (0x02)
+    // G14.2: Set range_mode to reserved value 0x02 (permissive: stored as-is)
     bfm_send_cmd(8'h20, 8'h00, 16'h0002);
     check(dut.host_range_mode == 2'b10,
-          "G14.2: Opcode 0x20 -> host_range_mode = 2'b10 (long)");
+          "G14.2: Opcode 0x20 -> host_range_mode = 2'b10 (reserved)");
 
-    // G14.3: Restore range_mode to auto (0x00)
+    // G14.3: Restore range_mode to 3 km (0x00)
     bfm_send_cmd(8'h20, 8'h00, 16'h0000);
     check(dut.host_range_mode == 2'b00,
-          "G14.3: Opcode 0x20 -> host_range_mode = 2'b00 (auto)");
+          "G14.3: Opcode 0x20 -> host_range_mode = 2'b00 (3 km)");
 
     // --- CFAR Guard Cells (0x21) ---
     // G14.4: Set guard cells to 4

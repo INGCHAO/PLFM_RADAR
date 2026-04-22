@@ -1,5 +1,7 @@
 `timescale 1ns / 1ps
 
+`include "radar_params.vh"
+
 module plfm_chirp_controller_enhanced (
     input wire clk_120m,
     input wire clk_100m,
@@ -45,7 +47,7 @@ parameter T2_RADAR_LISTENING = 20940; //174.5us at 120MHz
 parameter GUARD_SAMPLES = 21048;    // 175.4us at 120MHz
 
 // Chirp and beam parameters
-parameter CHIRP_MAX = 32;
+parameter CHIRP_MAX = `RP_CHIRPS_PER_FRAME;
 parameter ELEVATION_MAX = 31;
 parameter AZIMUTH_MAX = 50;
 
@@ -320,6 +322,11 @@ always @(posedge clk_120m or negedge reset_n) begin
             end
             
             DONE: begin
+                // Reset chirp_counter so the next frame restarts at chirp 0.
+                // Without this, frame 2+ starts at chirp_counter == CHIRP_MAX
+                // and the LONG_LISTEN transition guard (== CHIRP_MAX/2-1)
+                // never matches on the correct chirp.
+                chirp_counter <= 0;
                 chirp_done <= 1'b1;
                 chirp_data <= 8'd128;
             end
