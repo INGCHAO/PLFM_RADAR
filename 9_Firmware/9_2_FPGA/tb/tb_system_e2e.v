@@ -1166,10 +1166,19 @@ initial begin
     check(dut.host_range_mode == 2'b01,
           "G14.1: Opcode 0x20 -> host_range_mode = 2'b01 (long-range)");
 
-    // G14.2: Set range_mode to reserved value 0x02 (permissive: stored as-is)
+    // G14.2: Reserved value 0x02 must be clamped to 3 km (safe default)
+    //        so a garbled host write cannot silently enable long-range TX.
     bfm_send_cmd(8'h20, 8'h00, 16'h0002);
-    check(dut.host_range_mode == 2'b10,
-          "G14.2: Opcode 0x20 -> host_range_mode = 2'b10 (reserved)");
+    check(dut.host_range_mode == 2'b00,
+          "G14.2: Opcode 0x20 reserved=0x02 clamped to 2'b00 (3 km safe default)");
+
+    // G14.2b: Reserved value 0x03 also clamps to 3 km.
+    bfm_send_cmd(8'h20, 8'h00, 16'h0003);
+    check(dut.host_range_mode == 2'b00,
+          "G14.2b: Opcode 0x20 reserved=0x03 clamped to 2'b00 (3 km safe default)");
+
+    // Restore to a known-valid value before G14.3 asserts reset-to-3km.
+    bfm_send_cmd(8'h20, 8'h00, 16'h0001);
 
     // G14.3: Restore range_mode to 3 km (0x00)
     bfm_send_cmd(8'h20, 8'h00, 16'h0000);

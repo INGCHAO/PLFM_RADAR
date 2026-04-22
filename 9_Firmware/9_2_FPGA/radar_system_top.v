@@ -506,7 +506,10 @@ radar_transmitter tx_inst (
     .stm32_cs_adar2_1v8(stm32_cs_adar2_1v8),
     .stm32_cs_adar3_1v8(stm32_cs_adar3_1v8),
     .stm32_cs_adar4_1v8(stm32_cs_adar4_1v8),
-    
+
+    // Host range mode (clk_100m domain; CDC'd inside radar_transmitter)
+    .host_range_mode(host_range_mode),
+
     // Beam Position Tracking
     .current_elevation(tx_current_elevation),
     .current_azimuth(tx_current_azimuth),
@@ -1024,7 +1027,12 @@ always @(posedge clk_100m_buf or negedge sys_reset_n) begin
                     end
                 end
                 8'h16: host_gain_shift         <= usb_cmd_value[3:0];  // Fix 3: digital gain
-                8'h20: host_range_mode         <= usb_cmd_value[1:0];  // Range mode
+                // Range mode: clamp reserved codes (2'b10, 2'b11) to the safe
+                // 3 km default so a garbled host write cannot silently enable
+                // long-range TX behaviour.
+                8'h20: host_range_mode <= (usb_cmd_value[1:0] > 2'b01)
+                                              ? `RP_RANGE_MODE_3KM
+                                              : usb_cmd_value[1:0];
                 // CFAR configuration opcodes
                 8'h21: host_cfar_guard         <= usb_cmd_value[3:0];
                 8'h22: host_cfar_train         <= usb_cmd_value[4:0];

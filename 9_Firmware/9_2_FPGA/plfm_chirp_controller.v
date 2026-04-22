@@ -10,6 +10,10 @@ module plfm_chirp_controller_enhanced (
     input wire new_elevation,
     input wire new_azimuth,
     input wire mixers_enable,
+    // Range mode (CDC-synchronized into clk_120m by the caller).
+    //   2'b00 = 3 km  — short chirps only (skip LONG_CHIRP/LONG_LISTEN)
+    //   2'b01 = long-range — dual chirp (first half long, second half short)
+    input wire [1:0] range_mode,
     output reg [7:0] chirp_data,
     output reg chirp_valid,
 	 output wire new_chirp_frame,
@@ -80,7 +84,11 @@ reg [7:0] long_chirp_rd_data;
 assign chirp__toggling = new_chirp;
 assign elevation__toggling = new_elevation;
 assign azimuth__toggling = new_azimuth;
-assign new_chirp_frame = (current_state == IDLE && next_state == LONG_CHIRP);
+// new_chirp_frame fires on IDLE -> first active state (long or short
+// depending on range_mode).
+assign new_chirp_frame = (current_state == IDLE &&
+                          (next_state == LONG_CHIRP ||
+                           next_state == SHORT_CHIRP));
 
 // Mixer TX/RX sequencing — mutually exclusive based on chirp FSM state.
 // TX mixer active during chirp transmission, RX mixer during listen.
@@ -179,10 +187,20 @@ end
 always @(*) begin
     case (current_state)
         IDLE: begin
-            if (chirp__toggling && mixers_enable)
-                next_state = LONG_CHIRP;
-            else
+            // 3 km mode skips the long-chirp half entirely — LONG_CHIRP's
+            // 4500 m blind zone exceeds the 3 km max range, so long chirps
+            // would just pollute the receive window. Go straight to
+            // SHORT_CHIRP and let the SHORT_LISTEN -> DONE guard
+            // (chirp_counter == CHIRP_MAX-1) terminate after CHIRP_MAX
+            // short chirps.
+            if (chirp__toggling && mixers_enable) begin
+                if (range_mode == `RP_RANGE_MODE_3KM)
+                    next_state = SHORT_CHIRP;
+                else
+                    next_state = LONG_CHIRP;
+            end else begin
                 next_state = IDLE;
+            end
         end
         
         LONG_CHIRP: begin

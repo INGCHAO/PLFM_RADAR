@@ -42,6 +42,7 @@ always #5 clk_100m = ~clk_100m;
 // =========================================================================
 reg new_chirp, new_elevation, new_azimuth;
 reg mixers_enable;
+reg [1:0] range_mode;  // 2'b00 = 3 km (short-only), 2'b01 = long-range (dual)
 
 wire [7:0] chirp_data;
 wire chirp_valid;
@@ -78,6 +79,7 @@ plfm_chirp_controller_enhanced #(
     .new_elevation(new_elevation),
     .new_azimuth(new_azimuth),
     .mixers_enable(mixers_enable),
+    .range_mode(range_mode),
     .chirp_data(chirp_data),
     .chirp_valid(chirp_valid),
     .new_chirp_frame(new_chirp_frame),
@@ -184,7 +186,8 @@ initial begin
     new_elevation = 0;
     new_azimuth = 0;
     mixers_enable = 0;
-    
+    range_mode = 2'b01;  // Default: long-range (dual) — matches existing tests
+
     $display("");
     $display("============================================================");
     $display("  CHIRP CONTROLLER TESTBENCH");
@@ -493,6 +496,65 @@ initial begin
     check("ADAR load pins: adar_tx_load_1 is 0", adar_tx_load_1 == 1'b0);
     check("ADAR load pins: adar_rx_load_1 is 0", adar_rx_load_1 == 1'b0);
     
+    // =====================================================================
+    // TEST GROUP 8: RANGE MODE — 3 KM SHORT-ONLY PATH (C-1)
+    //
+    // Bug: plfm_chirp_controller_enhanced was not range_mode-aware; the
+    // FSM always ran LONG_CHIRP/LONG_LISTEN for CHIRP_MAX/2 chirps even
+    // when the host had selected 3 km mode. LONG_CHIRP's ~4.5 km blind
+    // zone exceeds the 3 km max, so those long chirps pollute the RX
+    // window. Fix: IDLE branches to SHORT_CHIRP directly when
+    // range_mode == RP_RANGE_MODE_3KM.
+    //
+    // These checks verify the skip path: no LONG_CHIRP ever entered, FSM
+    // reaches DONE after CHIRP_MAX short chirps.
+    // =====================================================================
+    $display("--- Group 8: Range Mode 3 km (C-1) ---");
+
+    // Full reset into 3 km mode.
+    reset_n = 0;
+    mixers_enable = 0;
+    new_chirp = 0;
+    range_mode = 2'b00;  // 3 km — short-only
+    #100;
+    reset_n = 1;
+    @(posedge clk_120m);
+
+    mixers_enable = 1;
+    @(posedge clk_120m);
+    new_chirp = 1;
+    @(posedge clk_120m);
+
+    // T8.1: Skip LONG_CHIRP, enter SHORT_CHIRP directly from IDLE.
+    wait_for_state(3'b100, 10);
+    check("3 km mode: IDLE -> SHORT_CHIRP (skips LONG_CHIRP)",
+          dut.current_state == 3'b100);
+
+    // T8.2: FSM must never have entered any LONG_* state in this frame.
+    //       (dut.current_state is sampled now; a transient visit would have
+    //        been caught by the wait_for_state above landing in 3'b001/3'b010
+    //        instead.)
+    check("3 km mode: FSM not in LONG_CHIRP",
+          dut.current_state != 3'b001);
+    check("3 km mode: FSM not in LONG_LISTEN",
+          dut.current_state != 3'b010);
+
+    // T8.3: After CHIRP_MAX short chirps, reach DONE. No GUARD_TIME in the
+    //       3 km path (GUARD bridges long->short; not needed here).
+    wait_for_state(3'b110,
+                   (T2_SAMPLES + T2_RADAR_LISTENING) * CHIRP_MAX + 50);
+    check("3 km mode: reaches DONE after CHIRP_MAX short chirps",
+          dut.current_state == 3'b110);
+
+    // T8.4: chirp_counter cleared at DONE (same invariant as C-3).
+    new_chirp = 0;
+    @(posedge clk_120m);
+    check("3 km mode: chirp_counter reset to 0 after DONE",
+          chirp_counter == 6'd0);
+
+    // Restore default for any future tests.
+    range_mode = 2'b01;
+
     // =====================================================================
     // SUMMARY
     // =====================================================================

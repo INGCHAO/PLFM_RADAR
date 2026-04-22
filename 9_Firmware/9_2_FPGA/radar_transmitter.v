@@ -37,6 +37,11 @@ module radar_transmitter(
     input wire stm32_new_elevation, 
     input wire stm32_new_azimuth,
     input wire stm32_mixers_enable,
+
+    // Range mode from host (clk_100m domain, opcode 0x20). CDC'd to clk_120m_dac
+    // internally and fed to plfm_chirp_controller_enhanced so 3 km mode skips
+    // the long-chirp half of the waveform entirely.
+    input wire [1:0] host_range_mode,
 	 
 	 output wire fpga_rf_switch,
 	 
@@ -143,6 +148,26 @@ always @(posedge clk_120m_dac or negedge reset_n) begin
 end
 assign new_chirp_pulse_120m = chirp_toggle_120m ^ chirp_toggle_120m_prev;
 
+// Sync host_range_mode (clk_100m level) to clk_120m_dac domain.
+// Only bit[0] toggles between the two valid codes (2'b00 / 2'b01) since
+// reserved codes are clamped at the source, so per-bit 2FF synchronization
+// has no coherency hazard.
+wire [1:0] range_mode_120m;
+cdc_single_bit #(.STAGES(2)) cdc_range_mode_bit0 (
+    .src_clk(clk_100m),
+    .dst_clk(clk_120m_dac),
+    .reset_n(reset_n),
+    .src_signal(host_range_mode[0]),
+    .dst_signal(range_mode_120m[0])
+);
+cdc_single_bit #(.STAGES(2)) cdc_range_mode_bit1 (
+    .src_clk(clk_100m),
+    .dst_clk(clk_120m_dac),
+    .reset_n(reset_n),
+    .src_signal(host_range_mode[1]),
+    .dst_signal(range_mode_120m[1])
+);
+
 // Sync stm32_mixers_enable (async GPIO level) to clk_120m_dac domain
 cdc_single_bit #(.STAGES(3)) cdc_mixers_en_120m (
     .src_clk(clk_100m),         // Treat as pseudo-source (GPIO is async)
@@ -213,6 +238,7 @@ plfm_chirp_controller_enhanced plfm_chirp_inst (
     .new_azimuth(new_azimuth_pulse),
     .new_chirp_frame(new_chirp_frame),
     .mixers_enable(mixers_enable_120m),    // CDC-synchronized level in clk_120m domain
+    .range_mode(range_mode_120m),          // CDC-synchronized range mode in clk_120m domain
     .chirp_data(chirp_data),
     .chirp_valid(chirp_valid),
     .chirp_done(chirp_sequence_done),
