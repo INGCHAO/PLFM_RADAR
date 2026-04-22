@@ -3,12 +3,22 @@
 /**
  * tb_mf_chain_synth.v
  *
- * Testbench for the SYNTHESIS branch of matched_filter_processing_chain.v.
- * This is compiled WITHOUT -DSIMULATION so the `else` branch (fft_engine-based)
- * is activated.
+ * ============================================================================
+ * DEPRECATED — STALE FOR 2048-PT ARCHITECTURE (integration/fft-2048-on-p0)
+ * ----------------------------------------------------------------------------
+ * This testbench hard-codes FFT_SIZE=1024 and targets the old synthesis branch
+ * sized for a 1024-point FFT. Production RTL now uses 2048-pt range FFT
+ * (RP_FFT_SIZE=2048). Do NOT add this TB to run_regression.sh until it has
+ * been rewritten for 2048 samples — running it as-is validates nothing against
+ * current RTL and will give false confidence.
  *
- * The synthesis branch uses an iterative fft_engine (1024-pt, single butterfly),
- * so processing takes ~40K+ clock cycles per frame. Timeouts are set accordingly.
+ * Build fails fast on compile to prevent accidental resurrection.
+ * ============================================================================
+ *
+ * Original description:
+ *   Testbench for the SYNTHESIS branch of matched_filter_processing_chain.v.
+ *   Compiled WITHOUT -DSIMULATION so the `else` (fft_engine) branch activates.
+ *   Synthesis branch uses iterative fft_engine; ~40K+ cycles per frame.
  */
 
 module tb_mf_chain_synth;
@@ -229,6 +239,14 @@ module tb_mf_chain_synth;
     initial begin
         $dumpfile("tb_mf_chain_synth.vcd");
         $dumpvars(0, tb_mf_chain_synth);
+
+`ifndef ALLOW_STALE_TB_MF_CHAIN_SYNTH
+        // DEPRECATED guard — see file header. Refuse to run until rewritten
+        // for 2048-pt architecture. Define ALLOW_STALE_TB_MF_CHAIN_SYNTH to
+        // override (for archaeology only; does not validate current RTL).
+        $display("ERROR: tb_mf_chain_synth.v is DEPRECATED (1024-pt). See header.");
+        $fatal;
+`endif
 
         // Init
         clk        = 0;

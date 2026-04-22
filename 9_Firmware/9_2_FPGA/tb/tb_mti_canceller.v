@@ -34,6 +34,7 @@ reg signed [DATA_W-1:0] range_q_in;
 reg                      range_valid_in;
 reg [5:0]                range_bin_in;
 reg                      mti_enable;
+reg                      tb_use_long_chirp;
 
 wire signed [DATA_W-1:0] range_i_out;
 wire signed [DATA_W-1:0] range_q_out;
@@ -64,6 +65,7 @@ mti_canceller #(
     .range_valid_out(range_valid_out),
     .range_bin_out(range_bin_out),
     .mti_enable(mti_enable),
+    .use_long_chirp(tb_use_long_chirp),  // driven by TB; T12 exercises boundary
     .mti_first_chirp(mti_first_chirp)
 );
 
@@ -92,6 +94,7 @@ task do_reset;
         range_q_in = 0;
         range_valid_in = 0;
         range_bin_in = 0;
+        tb_use_long_chirp = 1'b0;  // default homogeneous waveform
         repeat (5) @(posedge clk);
         reset_n = 1;
         repeat (2) @(posedge clk);
@@ -462,6 +465,89 @@ initial begin
 
     check(11, "T11.1: Negative inputs: diff I = 2000", cap_i[0] == 16'sd2000);
     check(11, "T11.2: Negative inputs: diff Q = 500", cap_q[0] == 16'sd500);
+
+    // ================================================================
+    // T12: Waveform boundary mute (R-1)
+    // ----------------------------------------------------------------
+    // Mode 01 interleaves long and short chirps. The MTI prev-buffer
+    // holds the previous chirp's range profile; subtracting a short-
+    // waveform profile from a long-waveform one (or vice versa) would
+    // inject a per-range-bin impulse into slow-time sample 0, creating
+    // phantom targets across every Doppler bin.
+    //
+    // mti_canceller.v mutes the output at the transition and overwrites
+    // the prev buffer in-flight so the next chirp (same waveform as the
+    // transition chirp) subtracts cleanly. This test exercises that
+    // path — without it, the long→short boundary would silently corrupt
+    // slow-time data on real hardware.
+    // ================================================================
+    do_reset;
+    mti_enable = 1'b1;
+
+    // Chirp A (long, val=1000) — first chirp, muted by first-chirp path.
+    tb_use_long_chirp = 1'b1;
+    fork
+        feed_chirp_const(16'sd1000, 16'sd500);
+        capture_chirp;
+    join
+    check(12, "T12.1: Waveform-A first chirp: muted I",
+          cap_count == NUM_BINS && cap_i[0] == 16'sd0);
+    check(12, "T12.2: Waveform-A first chirp: muted Q",
+          cap_q[0] == 16'sd0);
+
+    // Chirp B (long, val=2000) — same waveform: 2000 - 1000 = 1000.
+    tb_use_long_chirp = 1'b1;
+    cap_count = 0;
+    fork
+        feed_chirp_const(16'sd2000, 16'sd1500);
+        capture_chirp;
+    join
+    check(12, "T12.3: Homogeneous long follow-up: I diff = 1000",
+          cap_i[0] == 16'sd1000);
+    check(12, "T12.4: Homogeneous long follow-up: Q diff = 1000",
+          cap_q[0] == 16'sd1000);
+
+    // Chirp C (short, val=5000) — WAVEFORM CHANGED: must mute, and the
+    // prev buffer must be overwritten with THIS chirp (not subtracted
+    // against the long-waveform chirp B). If R-1 regresses, we'd see
+    // 5000 - 2000 = 3000 here instead of 0.
+    tb_use_long_chirp = 1'b0;
+    cap_count = 0;
+    fork
+        feed_chirp_const(16'sd5000, 16'sd3000);
+        capture_chirp;
+    join
+    check(12, "T12.5: Waveform boundary (long->short): muted I (not 3000)",
+          cap_i[0] == 16'sd0);
+    check(12, "T12.6: Waveform boundary (long->short): muted Q (not 2000)",
+          cap_q[0] == 16'sd0);
+
+    // Chirp D (short, val=5500) — same waveform as C: 5500 - 5000 = 500.
+    // This proves the prev buffer was correctly overwritten with C,
+    // not stuck on B's long-waveform profile.
+    tb_use_long_chirp = 1'b0;
+    cap_count = 0;
+    fork
+        feed_chirp_const(16'sd5500, 16'sd3250);
+        capture_chirp;
+    join
+    check(12, "T12.7: Post-boundary short follow-up: I diff = 500",
+          cap_i[0] == 16'sd500);
+    check(12, "T12.8: Post-boundary short follow-up: Q diff = 250",
+          cap_q[0] == 16'sd250);
+
+    // Chirp E (short -> long) — another boundary, reverse direction,
+    // confirms muting is symmetric.
+    tb_use_long_chirp = 1'b1;
+    cap_count = 0;
+    fork
+        feed_chirp_const(16'sd9000, 16'sd4000);
+        capture_chirp;
+    join
+    check(12, "T12.9: Waveform boundary (short->long): muted I",
+          cap_i[0] == 16'sd0);
+    check(12, "T12.10: Waveform boundary (short->long): muted Q",
+          cap_q[0] == 16'sd0);
 
     // ================================================================
     // SUMMARY

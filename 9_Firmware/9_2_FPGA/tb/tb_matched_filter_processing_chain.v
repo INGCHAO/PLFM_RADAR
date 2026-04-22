@@ -334,7 +334,24 @@ module tb_matched_filter_processing_chain;
         if (!(cap_peak_bin <= 128 || cap_peak_bin >= FFT_SIZE - 128)) begin
             $display("[WARN] Autocorrelation peak at bin %0d (expected near 0) - behavioral FFT noise, OK with Xilinx IP", cap_peak_bin);
         end
-        check(1'b1, "Autocorrelation peak (skipped - behavioral FFT noise)");
+        // Behavioral Q15 FFT scatters the peak, so we cannot assert bin
+        // location — but the peak MUST dominate the mean magnitude. This
+        // catches an all-zero/flat output that the old tautology allowed.
+        begin : p2m_grp3
+            integer k, sum_abs, mean_abs;
+            sum_abs = 0;
+            for (k = 0; k < FFT_SIZE; k = k + 1) begin
+                sum_abs = sum_abs
+                    + (cap_out_i[k][15] ? -cap_out_i[k] : cap_out_i[k])
+                    + (cap_out_q[k][15] ? -cap_out_q[k] : cap_out_q[k]);
+            end
+            mean_abs = sum_abs / FFT_SIZE;
+            $display("  Peak-to-mean |out|: peak=%0d mean=%0d ratio~%0dx",
+                     cap_max_abs, mean_abs,
+                     (mean_abs == 0) ? 999999 : cap_max_abs / mean_abs);
+            check(cap_max_abs > mean_abs * 2,
+                  "Autocorrelation peak dominates mean (>2x)");
+        end
         check(cap_max_abs > 0, "Peak magnitude > 0");
 
         // ════════════════════════════════════════════════════════
@@ -481,7 +498,18 @@ module tb_matched_filter_processing_chain;
         if (!(cap_peak_bin <= 128 || cap_peak_bin >= FFT_SIZE - 128)) begin
             $display("[WARN] Case 1: peak at bin %0d (expected near 0) - behavioral FFT noise", cap_peak_bin);
         end
-        check(1'b1, "Case 1: DUT peak bin (skipped - behavioral FFT noise)");
+        begin : p2m_case1
+            integer k, sum_abs, mean_abs;
+            sum_abs = 0;
+            for (k = 0; k < FFT_SIZE; k = k + 1) begin
+                sum_abs = sum_abs
+                    + (cap_out_i[k][15] ? -cap_out_i[k] : cap_out_i[k])
+                    + (cap_out_q[k][15] ? -cap_out_q[k] : cap_out_q[k]);
+            end
+            mean_abs = sum_abs / FFT_SIZE;
+            check(cap_max_abs > mean_abs * 2,
+                  "Case 1: Peak dominates mean (>2x, catches flat/zero output)");
+        end
         check(cap_max_abs > 0, "Case 1: Peak magnitude > 0");
 
         // ════════════════════════════════════════════════════════
@@ -512,7 +540,18 @@ module tb_matched_filter_processing_chain;
         if (!(cap_peak_bin <= 128 || cap_peak_bin >= FFT_SIZE - 128)) begin
             $display("[WARN] Case 2: peak at bin %0d (expected near 0) - behavioral FFT noise", cap_peak_bin);
         end
-        check(1'b1, "Case 2: DUT peak bin (skipped - behavioral FFT noise)");
+        begin : p2m_case2
+            integer k, sum_abs, mean_abs;
+            sum_abs = 0;
+            for (k = 0; k < FFT_SIZE; k = k + 1) begin
+                sum_abs = sum_abs
+                    + (cap_out_i[k][15] ? -cap_out_i[k] : cap_out_i[k])
+                    + (cap_out_q[k][15] ? -cap_out_q[k] : cap_out_q[k]);
+            end
+            mean_abs = sum_abs / FFT_SIZE;
+            check(cap_max_abs > mean_abs * 2,
+                  "Case 2: Peak dominates mean (>2x, catches flat/zero output)");
+        end
         check(cap_max_abs > 0, "Case 2: Peak magnitude > 0");
 
         // ════════════════════════════════════════════════════════

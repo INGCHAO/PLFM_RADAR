@@ -233,13 +233,29 @@ module tb_nco_400m;
         csv_file = $fopen("nco_freq_switch.csv", "w");
         $fwrite(csv_file, "sample,sin_out,cos_out\n");
 
-        for (sample_count = 0; sample_count < 200; sample_count = sample_count + 1) begin
-            @(posedge clk_400m); #1;
-            $fwrite(csv_file, "%0d,%0d,%0d\n",
-                    sample_count, sin_out, cos_out);
+        // Track sin/cos variance to verify NCO is actively generating a tone
+        // after the frequency switch (detects stuck/zero output).
+        begin : freq_switch_obs
+            integer fs_min, fs_max;
+            reg     fs_saw_x;
+            fs_min = 32'sh7FFFFFFF;
+            fs_max = -32'sh80000000;
+            fs_saw_x = 1'b0;
+            for (sample_count = 0; sample_count < 200; sample_count = sample_count + 1) begin
+                @(posedge clk_400m); #1;
+                $fwrite(csv_file, "%0d,%0d,%0d\n",
+                        sample_count, sin_out, cos_out);
+                if (^sin_out === 1'bx || ^cos_out === 1'bx) fs_saw_x = 1'b1;
+                if ($signed(sin_out) < fs_min) fs_min = $signed(sin_out);
+                if ($signed(sin_out) > fs_max) fs_max = $signed(sin_out);
+            end
+            $fclose(csv_file);
+            $display("  After freq switch: sin swing [%0d..%0d]", fs_min, fs_max);
+            check(!fs_saw_x,
+                  "Frequency switch: sin/cos outputs never X during 200 samples");
+            check(fs_max > fs_min,
+                  "Frequency switch: NCO output varies (not stuck) after switch");
         end
-        $fclose(csv_file);
-        check(1'b1, "Frequency switch completed without error");
 
         // ════════════════════════════════════════════════════════
         // TEST GROUP 6: phase_valid gating

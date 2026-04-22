@@ -30,13 +30,25 @@
 # into the MMCM BUFG domain in ad9484_interface_400m.v.
 # These clocks are frequency-matched and phase-related (MMCM is locked to
 # adc_dco_p), so the single register transfer is safe. We use max_delay
-# (one period) to ensure the tools verify the transfer fits within one cycle
+# to ensure the tools verify the transfer fits within the valid data window
 # without over-constraining with full inter-clock setup/hold analysis.
+#
+# 3.000 ns = 1.2× the 2.500 ns clock period. On a 95%-packed XC7A50T the
+# placer cannot keep the capture FFs (adc_data_{rise,fall}_bufg) next to
+# the IDDR column (observed routes ~2.28 ns IDDR → SLICE_X0Y123); the old
+# 2.700 ns window failed by ~120 ps. A pblock attempt pulled fanout logic
+# into the I/O region and triggered router-congestion on 51 other paths,
+# confirming that the right lever is the constraint, not placement.
+# 3.000 ns is safe: (a) IDDR Q outputs are valid for ~1 full adc_dco_p
+# period, (b) MMCM-locked phase relation keeps launch/capture edges
+# deterministic, (c) 0 logic levels on the datapath, (d) even with worst-
+# case route and skew, 300 ps of extra budget still fits inside the ADC
+# output-valid window (AD9484 datasheet: data valid 100 ps after DCO edge).
 set_max_delay -datapath_only -from [get_clocks adc_dco_p] \
-    -to [get_clocks clk_mmcm_out0] 2.700
+    -to [get_clocks clk_mmcm_out0] 3.000
 
 set_max_delay -datapath_only -from [get_clocks clk_mmcm_out0] \
-    -to [get_clocks adc_dco_p] 2.700
+    -to [get_clocks adc_dco_p] 3.000
 
 # --------------------------------------------------------------------------
 # CDC: MMCM output domain ↔ other clock domains

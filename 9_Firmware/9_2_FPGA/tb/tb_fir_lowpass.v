@@ -186,8 +186,22 @@ module tb_fir_lowpass;
                 output_count = output_count + 1;
             end
         end
-        // Symmetry is inherent in the coefficient initialization
-        check(1'b1, "Coefficients are symmetric (verified from RTL source)");
+        // Verify linear-phase symmetry: coeff[k] == coeff[TAPS-1-k] for all k.
+        // Reads the DUT's coefficient ROM directly via hierarchical reference.
+        begin : coeff_symmetry_check
+            integer sym_k;
+            reg sym_ok;
+            sym_ok = 1'b1;
+            for (sym_k = 0; sym_k < 16; sym_k = sym_k + 1) begin
+                if (uut.coeff[sym_k] !== uut.coeff[31 - sym_k]) begin
+                    $display("  [SYM] coeff[%0d]=%h != coeff[%0d]=%h",
+                             sym_k, uut.coeff[sym_k],
+                             31 - sym_k, uut.coeff[31 - sym_k]);
+                    sym_ok = 1'b0;
+                end
+            end
+            check(sym_ok, "Coefficients are symmetric (coeff[k] == coeff[31-k])");
+        end
 
         // ════════════════════════════════════════════════════════
         // TEST GROUP 5: Low-frequency sinusoid (passband)
@@ -287,8 +301,11 @@ module tb_fir_lowpass;
         end
 
         $display("  filter_overflow detected: %b", saw_nonzero);
-        // Note: overflow depends on coefficient sum — may or may not trigger
-        check(1'b1, "Overflow detection logic exists and runs");
+        // filter_overflow must be a valid 1-bit value at all times (not X/Z).
+        // Whether it fires with max input depends on coefficient sum — we do
+        // not assert a specific polarity, but the signal must be well-driven.
+        check(filter_overflow === 1'b0 || filter_overflow === 1'b1,
+              "filter_overflow is well-driven (not X/Z) after max-input stimulus");
 
         // ════════════════════════════════════════════════════════
         // TEST GROUP 8: data_valid gating

@@ -527,10 +527,14 @@ module tb_cdc_modules;
                 if (m2_dst_signal) saw_pulse = 1;
             end
             // Single src_clk pulse at 400MHz might be too short for 100MHz dst
-            // This is a known limitation of single-bit synchronizers
+            // This is a known limitation of single-bit synchronizers. We do
+            // not assert capture (drop is acceptable for a narrow pulse) — but
+            // the dst-side output MUST be well-defined (0 or 1, never X/Z)
+            // after synchronizer settling.
             $display("  Single src_clk pulse captured: %b (may miss — expected for narrow pulse)",
                      saw_pulse);
-            check(1'b1, "M2: Narrow pulse test completed (miss is acceptable)");
+            check(m2_dst_signal === 1'b0 || m2_dst_signal === 1'b1,
+                  "M2: Synchronizer output is well-defined (not X/Z) after narrow pulse");
         end
 
         // ── B5: Long pulse always captured ─────────────────────

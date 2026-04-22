@@ -118,6 +118,14 @@ endgenerate
 // frequency-matched. This single register stage transfers from IOB (BUFIO)
 // to fabric (BUFG) with guaranteed timing.
 // ============================================================================
+// Timing on the BUFIO→BUFG CDC edge is governed by a 3.000 ns
+// set_max_delay in constraints/adc_clk_mmcm.xdc (1.2× the 2.500 ns period),
+// which leaves the placer free and still fits inside the ADC data-valid
+// window. IOB=TRUE and a pblock around the IDDR column were both tried
+// and rejected: IOB packing fails because the BUFG clock on these
+// capture FFs can't share the ILOGIC clock mux with the BUFIO-clocked
+// IDDR, and the pblock pulled fanout logic into the I/O region and
+// triggered router congestion on 51 unrelated paths.
 reg [7:0] adc_data_rise_bufg;
 reg [7:0] adc_data_fall_bufg;
 
@@ -139,9 +147,24 @@ reg dco_phase;
 //
 // mmcm_locked gates de-assertion: the 400 MHz domain stays in reset until
 // the MMCM PLL has locked and the jitter-cleaned clock is stable.
+// mmcm_locked is a combinational MMCME2 output and can glitch; sync it
+// into the 400 MHz domain with a 2-FF chain before using it in the
+// async-reset branch below so a LOCKED blip doesn't asynchronously
+// re-reset the domain. The chain is itself async-reset by the raw
+// reset_n so it forces reset_n_gated=0 at power-up (no valid adc_dco
+// edges exist yet to clock the sync chain).
+(* ASYNC_REG = "TRUE" *) reg [1:0] mmcm_locked_sync_400m;
+always @(posedge adc_dco_buffered or negedge reset_n) begin
+    if (!reset_n)
+        mmcm_locked_sync_400m <= 2'b00;
+    else
+        mmcm_locked_sync_400m <= {mmcm_locked_sync_400m[0], mmcm_locked};
+end
+wire mmcm_locked_400m = mmcm_locked_sync_400m[1];
+
 (* ASYNC_REG = "TRUE" *) reg [1:0] reset_sync_400m;
 wire reset_n_400m;
-wire reset_n_gated = reset_n & mmcm_locked;
+wire reset_n_gated = reset_n & mmcm_locked_400m;
 
 always @(posedge adc_dco_buffered or negedge reset_n_gated) begin
     if (!reset_n_gated)

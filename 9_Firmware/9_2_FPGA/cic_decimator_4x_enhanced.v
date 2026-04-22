@@ -74,7 +74,15 @@ localparam COMB_WIDTH = 28;
 //                           DSP output) = 4 cycles at 400 MHz = 10 ns.
 //                           Negligible vs system reset assertion duration.
 // ----------------------------------------------------------------------------
-(* max_fanout = 25 *) reg reset_h = 1'b1;  // INIT=1'b1: registers start in reset state on power-up
+// max_fanout = 16 (reduced from 25): forces Vivado to replicate reset_h into
+// ~45 copies instead of ~28 across the DSP48E1 RST* + fabric loads, so each
+// replica drives a smaller cluster and places closer to its loads. Kept
+// because it shortens the longest reset_h_reg_rep__*/C → integrator_*/RSTP
+// route on a 95%-packed XC7A50T, but NOTE: the 52 ps WNS miss that first
+// motivated this tweak was ultimately closed by relaxing the BUFIO↔MMCM
+// set_max_delay from 2.700 ns to 3.000 ns in constraints/adc_clk_mmcm.xdc,
+// not by the fan-out change alone.
+(* max_fanout = 16 *) reg reset_h = 1'b1;  // INIT=1'b1: registers start in reset state on power-up
 always @(posedge clk) reset_h <= ~reset_n;
 
 // Sign-extended input for integrator_0 C port (48-bit)

@@ -3,6 +3,18 @@
 /**
  * tb_fullchain_mti_cfar_realdata.v
  *
+ * ============================================================================
+ * DEPRECATED — STALE FOR 2048-PT ARCHITECTURE (integration/fft-2048-on-p0)
+ * ----------------------------------------------------------------------------
+ * Hard-coded for INPUT_BINS=1024 / RANGE_BINS=64 / DECIM_FACTOR=16. Production
+ * pipeline is now 2048-pt range FFT -> 512 range bins (DECIM=4). Re-enabling
+ * this TB without regenerating Python goldens (golden_reference.py and the
+ * fullchain_*.hex files) would feed mis-sized data into current RTL and pass
+ * on nonsense. Do NOT wire into run_regression.sh until rewritten.
+ *
+ * Runtime guard ($fatal at startup) below prevents silent CI resurrection.
+ * ============================================================================
+ *
  * Full-chain co-simulation testbench: feeds real ADI CN0566 radar data
  * (post-range-FFT, 32 chirps x 1024 bins) through the complete signal
  * processing pipeline:
@@ -193,6 +205,7 @@ mti_canceller #(
     .range_valid_out(mti_valid_out),
     .range_bin_out(mti_bin_out),
     .mti_enable(1'b1),             // MTI always enabled for this test
+    .use_long_chirp(1'b0),         // homogeneous-waveform stimulus in this TB
     .mti_first_chirp(mti_first_chirp)
 );
 
@@ -353,6 +366,13 @@ integer cfar_ref_idx;
 integer cfar_mag_mismatches, cfar_thr_mismatches, cfar_det_mismatches;
 
 initial begin
+`ifndef ALLOW_STALE_TB_FULLCHAIN_MTI_CFAR
+    // DEPRECATED guard — see file header. Stale 1024-bin constants against
+    // 2048-pt production RTL. Define ALLOW_STALE_TB_FULLCHAIN_MTI_CFAR only
+    // for archaeology; this TB does not validate current pipeline.
+    $display("ERROR: tb_fullchain_mti_cfar_realdata.v DEPRECATED (1024-bin). See header.");
+    $fatal;
+`endif
     // ---- Init ----
     pass_count     = 0;
     fail_count     = 0;

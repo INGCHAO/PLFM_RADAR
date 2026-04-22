@@ -34,6 +34,19 @@
 
 `include "radar_params.vh"
 
+// ----------------------------------------------------------------------------
+// !!! 200T 20 km MODE BROKEN — FIX BEFORE 200T BRING-UP !!!
+// RANGE_BINS and the range_bin output port default to `RP_NUM_RANGE_BINS
+// (512) / `RP_RANGE_BIN_BITS (9). In 20 km mode the upstream pipeline
+// emits `RP_OUTPUT_RANGE_BINS_20KM = 4096 bins/chirp, which the internal
+// range-bin BRAMs and address counters here cannot represent — bins
+// 512..4095 alias onto bins 0..511 and the Doppler FFT collects a
+// scrambled slow-time vector per aliased range cell.
+// Latent on XC7A50T (SUPPORT_LONG_RANGE undefined → 3 km only); will
+// corrupt all 20 km output on XC7A200T. Before 200T bring-up: scale
+// RANGE_BINS with `RP_MAX_OUTPUT_BINS, widen range_bin, and resize the
+// per-range chirp buffers, or route 20 km mode around this block.
+// ----------------------------------------------------------------------------
 module doppler_processor_optimized #(
     parameter DOPPLER_FFT_SIZE   = `RP_DOPPLER_FFT_SIZE,    // 16
     parameter RANGE_BINS         = `RP_NUM_RANGE_BINS,      // 512

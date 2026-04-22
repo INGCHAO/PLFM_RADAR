@@ -1097,8 +1097,12 @@ initial begin
     // ================================================================
     $display("--- Group 12: Watchdog / Liveness ---");
 
-    // G12.1: System hasn't hung — we reached this point
-    check(1, "G12.1: System did not hang (reached final test group)");
+    // G12.1: System hasn't hung AND prior groups actually ran assertions.
+    // `check(1, ...)` alone is tautological; we additionally require that a
+    // meaningful number of earlier checks executed (catches a TB that skips
+    // past test groups via an @(posedge) that never fires or similar stall).
+    check(test_num > 20,
+          "G12.1: System reached final group AND >20 prior checks executed");
 
     // G12.2: Total simulation time is within budget
     check($time < SIM_TIMEOUT_NS,

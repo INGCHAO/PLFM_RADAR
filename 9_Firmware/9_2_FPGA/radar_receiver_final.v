@@ -485,6 +485,7 @@ mti_canceller #(
     .range_valid_out(mti_range_valid),
     .range_bin_out(mti_range_bin),
     .mti_enable(host_mti_enable),
+    .use_long_chirp(use_long_chirp),
     .mti_first_chirp(mti_first_chirp),
     .mti_saturation_count(mti_saturation_count_out)
 );

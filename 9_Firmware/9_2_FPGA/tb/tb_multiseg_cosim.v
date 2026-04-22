@@ -131,6 +131,15 @@ always @(posedge clk) begin
     end
 end
 
+// One-hot bitmap of distinct segment_request values observed during the run.
+// Used by TEST 4 to turn a tautological check into a real coverage assertion.
+reg [3:0] seg_request_seen;
+initial seg_request_seen = 4'b0000;
+always @(posedge clk) begin
+    if (reset_n && mem_request)
+        seg_request_seen <= seg_request_seen | (4'b0001 << segment_request);
+end
+
 // ============================================================================
 // Output capture
 // ============================================================================
@@ -586,11 +595,12 @@ initial begin
     // TEST 4: Verify segment_request output
     // ====================================================================
     $display("\n=== TEST 4: Segment Request Tracking ===");
-    // We verified segments 0-3 processed. Now check that segment_request
-    // was correctly driven during processing. Since we can't look back
-    // in time, we test by re-running and monitoring segment_request.
-    // For now, structural checks above suffice.
-    check(1'b1, "Segment request tracking (verified via segment transitions)");
+    // Verify that segment_request actually took all 4 values (0..3) during
+    // the long-chirp run, using the bitmap captured by the always-block above.
+    // A stuck segment_request would previously pass silently.
+    $display("  segment_request bitmap: %b (bit k = value k seen)", seg_request_seen);
+    check(seg_request_seen == 4'b1111,
+          "Segment request visited all 4 values (0,1,2,3) during long-chirp run");
 
     // ====================================================================
     // TEST 5: Non-zero output energy check
