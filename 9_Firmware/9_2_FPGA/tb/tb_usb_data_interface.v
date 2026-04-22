@@ -411,6 +411,21 @@ module tb_usb_data_interface;
         check(ft601_siwu_n === 1'b1,
               "ft601_siwu_n=1 after reset");
 
+        // ────────────────────────────────────────────────────────
+        // Frame-sync regression (NUM_CELLS bug)
+        //
+        // sample_counter was 12 bits wide with NUM_CELLS=2048 before the
+        // 2048-pt FFT architecture was completed. With 512 range bins x 32
+        // Doppler = 16384 cells per frame, the old 12-bit counter wrapped
+        // 8 times per real frame and the host saw 8 false frame-start
+        // markers. These checks pin the counter width and NUM_CELLS value
+        // so the regression fails loudly if either is narrowed again.
+        // ────────────────────────────────────────────────────────
+        check($bits(uut.sample_counter) >= 15,
+              "Frame-sync: sample_counter width >= 15 bits (holds 0..16383)");
+        check(uut.NUM_CELLS === 15'd16384,
+              "Frame-sync: NUM_CELLS == 16384 (512 range x 32 Doppler)");
+
         // ════════════════════════════════════════════════════════
         // TEST GROUP 2: Data packet word packing
         //

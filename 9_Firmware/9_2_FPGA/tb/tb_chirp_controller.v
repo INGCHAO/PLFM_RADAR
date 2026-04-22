@@ -322,7 +322,56 @@ initial begin
     // With new_chirp=0, FSM should stay in IDLE
     @(posedge clk_120m);
     check("FSM: returns to IDLE after DONE", dut.current_state == 3'b000);
-    
+
+    // =====================================================================
+    // TEST GROUP 3b: MULTI-FRAME REGRESSION (C-3)
+    //
+    // Bug: plfm_chirp_controller_enhanced never reset chirp_counter when the
+    // frame completed. After frame 1 the counter sat at CHIRP_MAX, so the
+    // LONG_LISTEN -> GUARD transition guard (== CHIRP_MAX/2-1) never matched
+    // on subsequent frames and frame 2+ ran extra chirps until the 6-bit
+    // counter wrapped.
+    //
+    // These checks prove the counter is cleared at DONE and frame 2 matches
+    // frame 1 exactly.
+    // =====================================================================
+    $display("--- Group 3b: Multi-Frame Regression (C-3) ---");
+
+    // T3b.1: Immediately after frame 1 DONE -> IDLE, counter is back to 0.
+    check("C-3: chirp_counter reset to 0 after 1st DONE", chirp_counter == 6'd0);
+
+    // Kick off frame 2 from the same IDLE state (no reset between frames).
+    @(posedge clk_120m);
+    new_chirp = 1;
+    @(posedge clk_120m);
+
+    // T3b.2: Frame 2 enters LONG_CHIRP.
+    wait_for_state(3'b001, 10);
+    check("Frame 2: enters LONG_CHIRP", dut.current_state == 3'b001);
+
+    // T3b.3: Frame 2 reaches GUARD_TIME after exactly CHIRP_MAX/2 long chirps.
+    //        (If the counter were not reset, the FSM would stall in
+    //         LONG_CHIRP/LONG_LISTEN until the 6-bit counter wrapped.)
+    wait_for_state(3'b011,
+                   (T1_SAMPLES + T1_RADAR_LISTENING) * (CHIRP_MAX/2) + 20);
+    check("Frame 2: reaches GUARD_TIME after CHIRP_MAX/2 long chirps",
+          dut.current_state == 3'b011);
+    check("Frame 2: chirp_counter == CHIRP_MAX/2 at GUARD_TIME",
+          chirp_counter == CHIRP_MAX/2);
+
+    // T3b.4: Frame 2 reaches DONE.
+    wait_for_state(3'b110,
+                   GUARD_SAMPLES +
+                   (T2_SAMPLES + T2_RADAR_LISTENING) * (CHIRP_MAX/2) + 20);
+    check("Frame 2: reaches DONE", dut.current_state == 3'b110);
+
+    // Deassert new_chirp so FSM stays in IDLE after DONE.
+    new_chirp = 0;
+    @(posedge clk_120m);
+
+    // T3b.5: Counter cleared again after frame 2 completes.
+    check("C-3: chirp_counter reset to 0 after 2nd DONE", chirp_counter == 6'd0);
+
     // =====================================================================
     // TEST GROUP 4: SINGLE-DRIVER VERIFICATION (A5 FIX CORE TEST)
     // =====================================================================
