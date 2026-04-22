@@ -105,7 +105,13 @@ module radar_receiver_final (
     // silent sample drop between the 400 MHz CIC output and the 100 MHz
     // FIR input; stays high until the next reset. OR'd into the GPIO
     // diagnostic bit at the top level.
-    output wire        ddc_cic_fir_overrun
+    output wire        ddc_cic_fir_overrun,
+
+    // C-4: timing-config commit strobe from rmc. radar_system_top uses
+    // this to atomically snapshot pending USB-written timing regs
+    // (opcodes 0x10..0x14) into the live regs this RX chain consumes,
+    // eliminating the mid-frame torn-reconfig hazard.
+    output wire        cfg_commit_strobe
 );
 
 // ========== INTERNAL SIGNALS ==========
@@ -216,7 +222,8 @@ radar_mode_controller rmc (
     .elevation_count(rmc_elevation_count),
     .azimuth_count(rmc_azimuth_count),
     .scanning(rmc_scanning),
-    .scan_complete(rmc_scan_complete)
+    .scan_complete(rmc_scan_complete),
+    .cfg_commit_strobe(cfg_commit_strobe)
 );
 wire clk_400m;
 

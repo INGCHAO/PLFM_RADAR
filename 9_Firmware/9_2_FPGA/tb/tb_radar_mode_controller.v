@@ -44,6 +44,7 @@ module tb_radar_mode_controller;
     wire [5:0]  azimuth_count;
     wire        scanning;
     wire        scan_complete;
+    wire        cfg_commit_strobe;
 
     // ── Test bookkeeping ───────────────────────────────────────
     integer pass_count;
@@ -60,6 +61,7 @@ module tb_radar_mode_controller;
     integer elevation_toggles;
     integer azimuth_toggles;
     integer scan_completes;
+    integer commit_pulses;
 
     // Saved values for toggle checks
     reg saved_mc_new_chirp;
@@ -104,7 +106,8 @@ module tb_radar_mode_controller;
         .elevation_count    (elevation_count),
         .azimuth_count      (azimuth_count),
         .scanning           (scanning),
-        .scan_complete      (scan_complete)
+        .scan_complete      (scan_complete),
+        .cfg_commit_strobe  (cfg_commit_strobe)
     );
 
     // ── Check task ─────────────────────────────────────────────
@@ -173,6 +176,12 @@ module tb_radar_mode_controller;
         check(azimuth_count === 6'd0,      "azimuth_count=0 after reset");
         check(scanning === 1'b0,           "scanning=0 after reset");
         check(scan_complete === 1'b0,      "scan_complete=0 after reset");
+
+        // C-4: cfg_commit_strobe must be HIGH while idle so a timing-reg
+        // opcode written before the first trigger is latched into the
+        // live set immediately (no stale default on first chirp).
+        check(cfg_commit_strobe === 1'b1,
+              "cfg_commit_strobe=1 while idle (pre-scan commit window)");
         reset_n = 1;
         @(posedge clk); #1;
 
@@ -249,10 +258,17 @@ module tb_radar_mode_controller;
         elevation_toggles = 0;
         azimuth_toggles   = 0;
         scan_completes    = 0;
+        commit_pulses     = 0;
 
         // Check: scanning starts immediately
         @(posedge clk); #1;
         check(scanning === 1'b1, "Scanning starts immediately in auto mode");
+
+        // C-4: once scanning is active, cfg_commit_strobe must drop low
+        // (no longer in S_IDLE). Sample immediately after the IDLE→chirp
+        // transition. It will pulse again only at elevation boundaries.
+        check(cfg_commit_strobe === 1'b0,
+              "cfg_commit_strobe=0 once scan has left IDLE");
 
         // Run for enough cycles to complete one full scan
         for (i = 0; i < 15000; i = i + 1) begin
@@ -266,6 +282,8 @@ module tb_radar_mode_controller;
                 azimuth_toggles = azimuth_toggles + 1;
             if (scan_complete)
                 scan_completes = scan_completes + 1;
+            if (cfg_commit_strobe)
+                commit_pulses = commit_pulses + 1;
 
             mc_new_chirp_prev     = mc_new_chirp;
             mc_new_elevation_prev = mc_new_elevation;
@@ -288,6 +306,11 @@ module tb_radar_mode_controller;
 
         check(chirp_toggles >= SIM_CHIRPS * SIM_ELEVATIONS * SIM_AZIMUTHS,
               "At least 24 chirp toggles in full scan");
+        // C-4: one commit pulse per elevation boundary (commit window).
+        // With SIM_ELEVATIONS*SIM_AZIMUTHS elevations visited per scan,
+        // the counter should see at least that many pulses.
+        check(commit_pulses >= SIM_ELEVATIONS * SIM_AZIMUTHS,
+              "cfg_commit_strobe pulses at every elevation boundary");
         check(scan_completes >= 1,
               "At least 1 scan completion detected");
         check(elevation_toggles >= SIM_AZIMUTHS,

@@ -217,6 +217,10 @@ wire        rx_range_decim_watchdog;
 // CIC→FIR CDC overrun sticky (audit F-1.2). High = at least one baseband
 // sample has been silently dropped between the 400 MHz CIC and 100 MHz FIR.
 wire        rx_ddc_cic_fir_overrun;
+// C-4: timing-config commit strobe from rmc (clk_100m domain). HIGH in
+// S_IDLE and pulsed at elevation/azimuth boundaries. Used to latch the
+// pending USB-written timing regs into the live regs the RX FSM reads.
+wire        cfg_commit_strobe;
 
 // Data packing for USB
 wire [31:0] usb_range_profile;
@@ -254,12 +258,27 @@ reg [3:0]  host_gain_shift;
 // These override the compile-time defaults in radar_mode_controller when
 // written via USB command. Defaults match the parameter values in
 // radar_mode_controller.v so behavior is unchanged until the host writes them.
-reg [15:0] host_long_chirp_cycles;    // Opcode 0x10 (default 3000)
-reg [15:0] host_long_listen_cycles;   // Opcode 0x11 (default 13700)
-reg [15:0] host_guard_cycles;         // Opcode 0x12 (default 17540)
-reg [15:0] host_short_chirp_cycles;   // Opcode 0x13 (default 50)
-reg [15:0] host_short_listen_cycles;  // Opcode 0x14 (default 17450)
-reg [5:0]  host_chirps_per_elev;      // Opcode 0x15 (default 32)
+// C-4: Split each timing reg into pending (USB write target) and live
+// (FSM consumer). The RX radar_mode_controller pulses cfg_commit_strobe
+// at every elevation/azimuth boundary (and holds it HIGH in S_IDLE),
+// and the live regs snapshot the pending set on that strobe. This
+// guarantees that a multi-opcode GUI reconfiguration (0x10 → 0x11 →
+// 0x12, separated by USB round-trips) can never be observed
+// mid-reconfiguration by the FSM: between frames the pending set is
+// either entirely old or entirely new. Without this, a mid-chirp update
+// to cfg_long_chirp_cycles below the current timer would immediately
+// truncate the chirp and corrupt that frame's range-Doppler map.
+reg [15:0] host_long_chirp_cycles_pending;    // Opcode 0x10 (default 3000)
+reg [15:0] host_long_listen_cycles_pending;   // Opcode 0x11 (default 13700)
+reg [15:0] host_guard_cycles_pending;         // Opcode 0x12 (default 17540)
+reg [15:0] host_short_chirp_cycles_pending;   // Opcode 0x13 (default 50)
+reg [15:0] host_short_listen_cycles_pending;  // Opcode 0x14 (default 17450)
+reg [15:0] host_long_chirp_cycles;            // Live: committed at frame boundary
+reg [15:0] host_long_listen_cycles;           // Live: committed at frame boundary
+reg [15:0] host_guard_cycles;                 // Live: committed at frame boundary
+reg [15:0] host_short_chirp_cycles;           // Live: committed at frame boundary
+reg [15:0] host_short_listen_cycles;          // Live: committed at frame boundary
+reg [5:0]  host_chirps_per_elev;              // Opcode 0x15 (default 32) — has dedicated clamp logic
 reg        host_status_request;       // Opcode 0xFF (self-clearing pulse)
 
 // Fix 4: Doppler/chirps mismatch protection
@@ -596,7 +615,9 @@ radar_receiver_final rx_inst (
     .mti_saturation_count_out(rx_mti_saturation_count),
     // Range-bin decimator watchdog (audit F-6.4)
     .range_decim_watchdog(rx_range_decim_watchdog),
-    .ddc_cic_fir_overrun(rx_ddc_cic_fir_overrun)
+    .ddc_cic_fir_overrun(rx_ddc_cic_fir_overrun),
+    // C-4: timing-reg commit strobe from rmc (live regs update only when high)
+    .cfg_commit_strobe(cfg_commit_strobe)
 );
 
 // ============================================================================
@@ -968,12 +989,18 @@ always @(posedge clk_100m_buf or negedge sys_reset_n) begin
         host_detect_threshold <= 16'd10000; // Default threshold
         host_stream_control <= `RP_STREAM_CTRL_DEFAULT; // Default: all streams, mag-only mode
         host_gain_shift     <= 4'd0;      // Default: pass-through (no gain change)
-        // Gap 2: chirp timing defaults (match radar_mode_controller parameters)
-        host_long_chirp_cycles  <= 16'd3000;
-        host_long_listen_cycles <= 16'd13700;
-        host_guard_cycles       <= 16'd17540;
-        host_short_chirp_cycles <= 16'd50;
-        host_short_listen_cycles <= 16'd17450;
+        // Gap 2: chirp timing defaults — initialize pending AND live to the
+        // same default so pre-first-trigger behavior matches the old code.
+        host_long_chirp_cycles_pending   <= 16'd3000;
+        host_long_listen_cycles_pending  <= 16'd13700;
+        host_guard_cycles_pending        <= 16'd17540;
+        host_short_chirp_cycles_pending  <= 16'd50;
+        host_short_listen_cycles_pending <= 16'd17450;
+        host_long_chirp_cycles           <= 16'd3000;
+        host_long_listen_cycles          <= 16'd13700;
+        host_guard_cycles                <= 16'd17540;
+        host_short_chirp_cycles          <= 16'd50;
+        host_short_listen_cycles         <= 16'd17450;
         host_chirps_per_elev    <= 6'd32;
         host_status_request     <= 1'b0;
         chirps_mismatch_error   <= 1'b0;
@@ -1005,12 +1032,15 @@ always @(posedge clk_100m_buf or negedge sys_reset_n) begin
                 8'h02: host_trigger_pulse  <= 1'b1;
                 8'h03: host_detect_threshold <= usb_cmd_value;
                 8'h04: host_stream_control <= usb_cmd_value[5:0];
-                // Gap 2: chirp timing configuration
-                8'h10: host_long_chirp_cycles  <= usb_cmd_value;
-                8'h11: host_long_listen_cycles <= usb_cmd_value;
-                8'h12: host_guard_cycles       <= usb_cmd_value;
-                8'h13: host_short_chirp_cycles <= usb_cmd_value;
-                8'h14: host_short_listen_cycles <= usb_cmd_value;
+                // Gap 2: chirp timing configuration — writes land in the
+                // PENDING set. The live set atomically snapshots pending
+                // on cfg_commit_strobe (S_IDLE or elevation boundary).
+                // See C-4 note at the timing-reg declaration.
+                8'h10: host_long_chirp_cycles_pending   <= usb_cmd_value;
+                8'h11: host_long_listen_cycles_pending  <= usb_cmd_value;
+                8'h12: host_guard_cycles_pending        <= usb_cmd_value;
+                8'h13: host_short_chirp_cycles_pending  <= usb_cmd_value;
+                8'h14: host_short_listen_cycles_pending <= usb_cmd_value;
                 8'h15: begin
                     // Fix 4: Clamp chirps_per_elev to the fixed Doppler frame size.
                     // If host requests a different value, clamp and set error flag.
@@ -1055,6 +1085,20 @@ always @(posedge clk_100m_buf or negedge sys_reset_n) begin
                 8'hFF: host_status_request     <= 1'b1;  // Gap 2: status readback
                 default: ;
             endcase
+        end
+
+        // C-4: atomic commit of pending → live timing regs. The strobe is
+        // HIGH while the RX FSM is in S_IDLE and pulses for 1 clk_100m
+        // cycle at every elevation/azimuth boundary. Live regs are only
+        // updated on the strobe, so the FSM always sees a self-consistent
+        // set even when the GUI sends opcodes 0x10..0x14 as separate USB
+        // packets with arbitrary inter-opcode latency.
+        if (cfg_commit_strobe) begin
+            host_long_chirp_cycles   <= host_long_chirp_cycles_pending;
+            host_long_listen_cycles  <= host_long_listen_cycles_pending;
+            host_guard_cycles        <= host_guard_cycles_pending;
+            host_short_chirp_cycles  <= host_short_chirp_cycles_pending;
+            host_short_listen_cycles <= host_short_listen_cycles_pending;
         end
     end
 end

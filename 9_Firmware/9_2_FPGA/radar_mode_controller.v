@@ -97,7 +97,15 @@ module radar_mode_controller #(
 
     // Status
     output wire scanning,       // 1 = scan in progress
-    output wire scan_complete   // pulse when full scan done
+    output wire scan_complete,  // pulse when full scan done
+
+    // Timing-config commit strobe (see "Timing-Config Commit" note below).
+    // Held HIGH while scanning is idle (S_IDLE) and pulsed for 1 clock at
+    // every elevation/azimuth boundary so radar_system_top can atomically
+    // copy its USB-written pending timing regs into the live regs the FSM
+    // reads. Guarantees no torn (cfg_long_chirp, cfg_long_listen, ...)
+    // reconfiguration mid-frame.
+    output wire cfg_commit_strobe
 
 `ifdef FORMAL
     ,
@@ -127,6 +135,29 @@ reg [17:0] timer;  // enough for up to 262143 cycles (~2.6ms at 100 MHz)
 assign fv_scan_state = scan_state;
 assign fv_timer      = timer;
 `endif
+
+// ============================================================================
+// Timing-Config Commit Strobe
+//
+// radar_system_top uses this to snapshot pending USB-written timing regs
+// (opcodes 0x10..0x14) into the live regs this FSM consumes. The strobe
+// is ASSERTED whenever it is safe to commit new timing:
+//   (a) FSM is in S_IDLE (no chirp underway)  -> held HIGH continuously
+//       so an opcode written before the first trigger takes effect on
+//       the first chirp.
+//   (b) FSM is in S_ADVANCE at the elevation/azimuth boundary (i.e.,
+//       chirp_count has reached the last chirp of the current elevation)
+//       -> pulsed for the single S_ADVANCE cycle. The next frame of
+//       CHIRPS_PER_ELEVATION chirps runs with the newly-committed set.
+//
+// Combinational (no added FF). scan_state and chirp_count are registers
+// in the same clock domain, so this wire is glitch-free relative to the
+// destination register's clock edge. Downstream is a synchronous-enable
+// FF in radar_system_top, which captures cleanly on the rising edge.
+// ============================================================================
+assign cfg_commit_strobe =
+       (scan_state == S_IDLE) ||
+       ((scan_state == S_ADVANCE) && (chirp_count >= cfg_chirps_per_elev - 1));
 
 // Edge detection for STM32 pass-through
 reg stm32_new_chirp_prev;
