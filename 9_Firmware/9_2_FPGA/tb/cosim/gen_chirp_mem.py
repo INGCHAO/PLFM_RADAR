@@ -35,21 +35,95 @@ Usage:
 
 import math
 import os
+import re
 import sys
 
 # ============================================================================
-# AERIS-10 Parameters (matching radar_scene.py)
+# AERIS-10 Parameters
+#
+# Sample counts / FFT size / segmentation come from radar_params.vh so a
+# change there (e.g. a new long-chirp duration) flows into the .mem files
+# automatically — no risk of Python and RTL disagreeing on buffer sizes.
+#
+# Physical chirp design constants (bandwidth, sample rate, Q15 scaling)
+# stay hardcoded here: they live outside radar_params.vh because they are
+# baseband-generation properties, not FPGA sizing parameters.
 # ============================================================================
+
+RADAR_PARAMS_VH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', '..', 'radar_params.vh'
+)
+
+
+def _parse_radar_params(path):
+    """
+    Parse `\\`define RP_<NAME>  <integer>` lines from radar_params.vh.
+    Only integer literals are supported (decimal / hex / binary); the
+    macros this script consumes are all integers. Comments / strings /
+    concat macros are ignored by the regex.
+    """
+    # Matches: `define RP_NAME   <int-literal>  [// comment]
+    pat = re.compile(
+        r"^\s*`define\s+(RP_\w+)\s+"
+        r"(?:(\d+)'[bdh][0-9a-fA-F_]+|0[xX][0-9a-fA-F]+|\d+)"
+    )
+    # Simpler: grab the whole RHS up to comment, then eval as int.
+    line_pat = re.compile(r"^\s*`define\s+(RP_\w+)\s+([^/\n]+?)(?://.*)?$")
+    params = {}
+    with open(path) as f:
+        for line in f:
+            m = line_pat.match(line)
+            if not m:
+                continue
+            name, rhs = m.group(1), m.group(2).strip()
+            # Strip Verilog sized-literal prefix like 11'd2048 or 2'b00.
+            sized = re.match(r"\d+'([bdh])([0-9a-fA-F_]+)", rhs)
+            if sized:
+                base = {'b': 2, 'd': 10, 'h': 16}[sized.group(1)]
+                try:
+                    params[name] = int(sized.group(2).replace('_', ''), base)
+                except ValueError:
+                    continue
+                continue
+            # Plain integer (decimal or 0x...).
+            try:
+                params[name] = int(rhs, 0)
+            except ValueError:
+                # Non-integer macro (string, expression, cross-reference) —
+                # skip; this script only needs the integer sizing macros.
+                continue
+    return params
+
+
+_RP = _parse_radar_params(RADAR_PARAMS_VH)
+
+
+def _require(name):
+    if name not in _RP:
+        sys.stderr.write(
+            f"gen_chirp_mem.py: `{name}` not found in radar_params.vh; "
+            f"update the RTL macro or the parser.\n"
+        )
+        sys.exit(2)
+    return _RP[name]
+
+
+# Physical chirp design constants (not in radar_params.vh — baseband only).
 CHIRP_BW = 20e6           # 20 MHz sweep bandwidth
 FS_SYS = 100e6            # System clock (100 MHz, post-CIC)
-T_LONG_CHIRP = 30e-6      # 30 us long chirp duration
-T_SHORT_CHIRP = 0.5e-6    # 0.5 us short chirp duration
-FFT_SIZE = 2048
-LONG_CHIRP_SAMPLES = int(T_LONG_CHIRP * FS_SYS)   # 3000
-SHORT_CHIRP_SAMPLES = int(T_SHORT_CHIRP * FS_SYS)  # 50
-LONG_SEGMENTS = 2
 SCALE = 0.9               # Q15 scaling factor (matches radar_scene.py)
 Q15_MAX = 32767
+
+# Sizing / sample counts sourced from radar_params.vh (single source of truth).
+FFT_SIZE            = _require('RP_FFT_SIZE')
+LONG_CHIRP_SAMPLES  = _require('RP_LONG_CHIRP_SAMPLES_3KM')
+SHORT_CHIRP_SAMPLES = _require('RP_SHORT_CHIRP_SAMPLES')
+LONG_SEGMENTS       = _require('RP_LONG_SEGMENTS_3KM')
+
+# Durations are derived from sample counts + FS_SYS so a change to
+# RP_LONG_CHIRP_SAMPLES_3KM automatically re-targets the chirp rate.
+T_LONG_CHIRP  = LONG_CHIRP_SAMPLES  / FS_SYS
+T_SHORT_CHIRP = SHORT_CHIRP_SAMPLES / FS_SYS
 
 # Output directory (FPGA RTL root, where .mem files live)
 MEM_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
