@@ -544,6 +544,11 @@ run_test "DDC Chain (NCO→CIC→FIR)" \
     tb/tb_ddc_cosim.v ddc_400m.v nco_400m_enhanced.v \
     cic_decimator_4x_enhanced.v fir_lowpass.v cdc_modules.v
 
+run_test "DDC 400M (standalone unit)" \
+    tb/tb_ddc_400m_reg.vvp \
+    tb/tb_ddc_400m.v ddc_400m.v nco_400m_enhanced.v \
+    cic_decimator_4x_enhanced.v cdc_modules.v fir_lowpass.v
+
 # Real-data co-simulation: committed golden hex vs RTL (exact match required).
 # These catch architecture mismatches (e.g. 32-pt → dual 16-pt Doppler FFT)
 # that self-blessing golden-generate/compare tests cannot detect.
@@ -634,6 +639,10 @@ run_test "Matched Filter Chain" \
     tb/tb_matched_filter_processing_chain.v matched_filter_processing_chain.v \
     fft_engine.v chirp_memory_loader_param.v
 
+run_test "Frequency Matched Filter" \
+    tb/tb_fmf_reg.vvp \
+    tb/tb_freq_matched_filter.v frequency_matched_filter.v
+
 echo ""
 
 # ===========================================================================
@@ -660,6 +669,14 @@ run_test "Range Bin Decimator" \
 run_test "Radar Mode Controller" \
     tb/tb_rmc_reg.vvp \
     tb/tb_radar_mode_controller.v radar_mode_controller.v
+
+run_test "DDC Input Interface (18→16 round/sat)" \
+    tb/tb_ddc_in_reg.vvp \
+    tb/tb_ddc_input_interface.v ddc_input_interface.v
+
+run_test "Latency Buffer" \
+    tb/tb_latbuf_reg.vvp \
+    tb/tb_latency_buffer.v latency_buffer.v
 
 echo ""
 

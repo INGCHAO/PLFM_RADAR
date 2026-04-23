@@ -5,6 +5,9 @@ on:
     branches: [main, develop]
   push:
     branches: [main, develop]
+  schedule:
+    - cron: "0 7 * * *"   # Nightly 07:00 UTC — slow-path fuzz
+  workflow_dispatch:
 
 jobs:
   # ===========================================================================
@@ -113,4 +116,35 @@ jobs:
         run: >
           uv run pytest
           9_Firmware/tests/cross_layer/test_cross_layer_contract.py
+          -v --tb=short
+
+  # ===========================================================================
+  # DDC Co-Sim Fuzz (slow, nightly + manual dispatch only)
+  # 100 random seeds through the full DDC pipeline vs Python radar_scene model.
+  # Gated on schedule/workflow_dispatch to keep PRs fast; skipped on push/PR.
+  # ===========================================================================
+  fpga-fuzz:
+    name: FPGA DDC Fuzz (slow)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Run DDC fuzz (100-seed sweep)
+        run: >
+          uv run pytest -m slow
+          9_Firmware/tests/cross_layer/test_ddc_cosim_fuzz.py
           -v --tb=short
