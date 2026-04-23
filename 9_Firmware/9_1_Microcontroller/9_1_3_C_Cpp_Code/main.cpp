@@ -70,6 +70,10 @@ extern "C" {
 
 #include "stm32f7xx_hal.h"
 
+#ifndef PI
+#define PI 3.14159265358979323846f
+#endif
+
 
 
 
@@ -659,8 +663,8 @@ SystemError_t checkSystemHealth(void) {
     if (HAL_GetTick() - last_clock_check > 5000) {
         GPIO_PinState s0 = HAL_GPIO_ReadPin(AD9523_STATUS0_GPIO_Port, AD9523_STATUS0_Pin);
         GPIO_PinState s1 = HAL_GPIO_ReadPin(AD9523_STATUS1_GPIO_Port, AD9523_STATUS1_Pin);
-        DIAG_GPIO("CLK", "AD9523 STATUS0", s0);
-        DIAG_GPIO("CLK", "AD9523 STATUS1", s1);
+        DIAG_GPIO("CLK", "AD9523 STATUS0", AD9523_STATUS0_GPIO_Port, AD9523_STATUS0_Pin);
+        DIAG_GPIO("CLK", "AD9523 STATUS1", AD9523_STATUS1_GPIO_Port, AD9523_STATUS1_Pin);
         if (s0 == GPIO_PIN_RESET || s1 == GPIO_PIN_RESET) {
             current_error = ERROR_AD9523_CLOCK;
             DIAG_ERR("CLK", "AD9523 clock health check FAILED (STATUS0=%d STATUS1=%d)", s0, s1);
